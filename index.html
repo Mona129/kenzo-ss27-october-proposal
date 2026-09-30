@@ -13,6 +13,8 @@ main{max-width:1260px;margin:auto;padding:30px 30px 90px}.eyebrow{font:600 11px/
 
 .editor-head input{padding:8px 10px;max-width:160px;border:1px solid #aebbb0;background:#fff;color:#1e2422;font:inherit}.editor-head input:focus{outline:2px solid #315844}
 [data-edit]{white-space:pre-line}
+
+.editor-bar[hidden]{display:none}.editor-bar{position:fixed;bottom:0;left:0;right:0;z-index:30;background:#f9fbf8;border-top:1px solid #9dad9e;box-shadow:0 -6px 24px #18271d25;padding:12px max(18px,calc((100vw - 1200px)/2));font-size:13px}.editor-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.editor-head strong{margin-right:6px}.editor-head button,.editor-head input{border:1px solid #a6b5a9;background:white;padding:9px 12px;border-radius:3px;color:#1e2422;font:inherit}.editor-head button{cursor:pointer}.editor-head button.primary{background:#22533a;color:white;border-color:#22533a}.editor-head input{width:225px}.editor-head a{text-decoration:underline;color:#355943}.editor-head .status{flex-basis:100%;color:#53675a;min-height:20px}.editing [data-edit]{outline:1px dashed #9eafa2;outline-offset:3px;cursor:text}.editing [data-edit]:focus{outline:2px solid #22533a;background:#f6fbf7}.editing main{padding-bottom:150px}[data-edit]{white-space:pre-line}
 </style></head><body><header class="topbar">
     <strong>KENZO</strong><span class="topbar-topic">SS27 / 十月内容提案</span>
     <span class="stamp">2026.09.30</span>
@@ -70,4 +72,42 @@ main{max-width:1260px;margin:auto;padding:30px 30px 90px}.eyebrow{font:600 11px/
       </tbody></table></div>
       <p class="footnote" data-edit="scheduleNote">10/21 之后的具体 SKU 以 Digital 在售情况确认；Double K 女装留待对应批次上线。</p>
     </section>
-  </main></body></html>
+  </main><aside class="editor-bar" id="editorBar" hidden><div class="editor-head"><strong>文字编辑</strong><span>直接点页面上的文字修改</span><input id="githubToken" type="password" autocomplete="off" spellcheck="false" placeholder="GitHub 访问令牌（仅编辑者）" aria-label="GitHub 访问令牌"><button class="primary" id="saveBtn" type="button">保存到公开页</button><button id="resetBtn" type="button">撤销本次修改</button><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">首次连接说明 ↓</a><div class="status" id="editStatus" role="status">首次连接：在 GitHub 建立 Fine-grained token，仓库选 Mona129/kenzo-ss27-october-proposal，权限 Contents 设 Read and write。令牌只保存在此浏览器标签页中，不会写入网页。</div></div></aside><script>
+(()=>{
+const OWNER='Mona129',REPO='kenzo-ss27-october-proposal';
+const elements=[...document.querySelectorAll('[data-edit]')],bar=document.getElementById('editorBar');
+const status=document.getElementById('editStatus'),tokenInput=document.getElementById('githubToken');
+const setStatus=(message,error=false)=>{status.textContent=message;status.style.color=error?'#a12c2c':'#355943'};
+let initial={},revision='initial';
+const apply=fields=>{for(const el of elements){const key=el.dataset.edit;if(Object.hasOwn(fields,key)) el.textContent=fields[key]}};
+const read=()=>Object.fromEntries(elements.map(el=>[el.dataset.edit,el.textContent.trim()]));
+async function load(){try{const r=await fetch('./content.json?load='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(!data.fields||typeof data.fields!=='object')throw Error('内容格式错误');apply(data.fields);initial=read();revision=data.revision||'initial'}catch(e){initial=read();if(location.search.includes('edit=1'))setStatus('无法读取已发布文字：'+e.message,true)}}
+function editing(on){document.body.classList.toggle('editing',on);bar.hidden=!on;for(const el of elements)el.contentEditable=on?'plaintext-only':'false'}
+if(new URLSearchParams(location.search).get('edit')==='1'){
+ editing(true);tokenInput.value=sessionStorage.getItem('kenzo-gh-token')||'';
+ tokenInput.addEventListener('change',()=>{const t=tokenInput.value.trim();if(t)sessionStorage.setItem('kenzo-gh-token',t);else sessionStorage.removeItem('kenzo-gh-token')});
+ document.getElementById('resetBtn').onclick=()=>{apply(initial);setStatus('已撤销本次修改。')};
+ document.getElementById('saveBtn').onclick=save;
+}else editing(false);
+async function save(){const btn=document.getElementById('saveBtn'),token=tokenInput.value.trim();if(!token){setStatus('请先填入只授权此仓库 Contents 读写的令牌。',true);tokenInput.focus();return}
+ const fields=read();if(JSON.stringify(fields)===JSON.stringify(initial)){setStatus('没有需要保存的文字。');return}
+ btn.disabled=true;btn.textContent='正在保存…';sessionStorage.setItem('kenzo-gh-token',token);
+ try{
+ const api=`https://api.github.com/repos/${OWNER}/${REPO}/contents/content.json`;
+ const headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+ const currentResponse=await fetch(api,{headers,cache:'no-store'});if(!currentResponse.ok)throw Error('GitHub 读取失败（'+currentResponse.status+'）。请核对令牌的仓库与 Contents 权限。');
+ const current=await currentResponse.json();
+ const fresh=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(current.content.replace(/\s/g,'')),c=>c.charCodeAt(0))));
+ if(fresh.revision!==revision)throw Error('已有其他更新。请刷新编辑页后再修改，避免覆盖。');
+ const nextRevision=Date.now().toString();const payload=JSON.stringify({revision:nextRevision,fields},null,2)+'\n';
+ const bytes=new TextEncoder().encode(payload);let binary='';for(const b of bytes)binary+=String.fromCharCode(b);
+ const response=await fetch(api,{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({message:'Update proposal text',content:btoa(binary),sha:current.sha,branch:'main'})});
+ if(!response.ok){const detail=await response.json().catch(()=>({}));throw Error('保存失败（'+response.status+'）：'+(detail.message||'请稍后重试'))}
+ initial=fields;revision=nextRevision;setStatus('已提交，正在等待公开页更新…');
+ let live=false;for(let i=0;i<45;i++){await new Promise(resolve=>setTimeout(resolve,4000));const r=await fetch('./content.json?verify='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json();if(d.revision===nextRevision){live=true;break}}}
+ setStatus(live?'公开页已更新。把不带 ?edit=1 的网址发给老板即可。':'已保存到 GitHub，网页仍在发布中；稍后刷新公开页查看。');
+ }catch(e){setStatus(e.message,true)}finally{btn.disabled=false;btn.textContent='保存到公开页'}
+}
+load();
+})();
+</script></body></html>
